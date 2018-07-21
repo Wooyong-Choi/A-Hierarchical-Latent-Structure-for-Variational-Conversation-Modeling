@@ -148,9 +148,7 @@ class BaseRNNDecoder(nn.Module):
             # =>
             # out: [batch_size x beam_size, vocab_size]
             # h: [num_layers, batch_size x beam_size, hidden_size]
-            out, h = self.forward_step(x, h,
-                                       encoder_outputs=encoder_outputs,
-                                       input_valid_length=input_valid_length)
+            out, h = self.forward_step(x, h, encoder_outputs=encoder_outputs, input_valid_length=input_valid_length)
             # log_prob: [batch_size x beam_size, vocab_size]
             log_prob = F.log_softmax(out, dim=1)
 

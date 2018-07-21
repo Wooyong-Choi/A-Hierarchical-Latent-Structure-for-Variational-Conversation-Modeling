@@ -42,6 +42,34 @@ class DialogDataset(Dataset):
         """word => word id"""
         # [max_conversation_length, max_sentence_length]
         return [self.vocab.sent2id(sentence) for sentence in sentences]
+    
+
+class DialogEvalDataset(DialogDataset):
+    '''
+    Dataset class for ADEM training
+    Added gold response and score
+    
+    sentences[0:-2] : Contexts
+    sentences[-2] : Gold response
+    sentences[-1] : Predicted response
+    '''
+    def __init__(self, sentences, conversation_length, sentence_length, score, vocab, data=None):
+        super().__init__(sentences, conversation_length, sentence_length, vocab, data)
+        
+        self.score = score
+
+    def __getitem__(self, index):
+        """Return Single data sentence"""
+        # [max_conversation_length, max_sentence_length]
+        sentence = self.sentences[index]
+        conversation_length = self.conversation_length[index]
+        sentence_length = self.sentence_length[index]
+        score = self.score[index]
+
+        # word => word_ids
+        sentence = self.sent2id(sentence)
+
+        return sentence, conversation_length, sentence_length, score
 
 
 def get_loader(sentences, conversation_length, sentence_length, vocab, batch_size=100, data=None, shuffle=True):

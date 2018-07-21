@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID
-import layers
+import layers as layers
 import numpy as np
 import random
 

@@ -10,12 +10,18 @@ from layers.rnncells import StackedLSTMCell, StackedGRUCell
 
 project_dir = Path(__file__).resolve().parent.parent
 data_dir = project_dir.joinpath('datasets')
-data_dict = {'cornell': data_dir.joinpath('cornell'), 'ubuntu': data_dir.joinpath('ubuntu')}
+data_dict = {
+    'cornell': data_dir.joinpath('cornell'),
+    'ubuntu': data_dir.joinpath('ubuntu'),
+    'smart_ko': data_dir.joinpath('smart_ko'), 
+    'smart_ko_adem': data_dir.joinpath('smart_ko_adem'), 
+    'smart_ko_word': data_dir.joinpath('smart_ko_word')
+}
 optimizer_dict = {'RMSprop': optim.RMSprop, 'Adam': optim.Adam}
 rnn_dict = {'lstm': nn.LSTM, 'gru': nn.GRU}
 rnncell_dict = {'lstm': StackedLSTMCell, 'gru': StackedGRUCell}
 username = Path.home().name
-save_dir = Path(f'/data1/{username}/conversation/')
+save_dir = Path(os.getcwd())
 
 
 def str2bool(v):
@@ -57,7 +63,7 @@ class Config(object):
 
         # Save path
         if self.mode == 'train' and self.checkpoint is None:
-            time_now = datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
+            time_now = datetime.now().strftime('%Y-%m-%d_%H%M%S')
             self.save_path = save_dir.joinpath(self.data, self.model, time_now)
             self.logdir = self.save_path
             os.makedirs(self.save_path, exist_ok=True)

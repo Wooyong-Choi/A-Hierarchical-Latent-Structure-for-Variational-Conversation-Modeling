@@ -2,7 +2,7 @@ from itertools import cycle
 import numpy as np
 import torch
 import torch.nn as nn
-import models
+import models 
 from layers import masked_cross_entropy
 from utils import to_var, time_desc_decorator, TensorboardWriter, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, normal_kl_div, embedding_metric
 import os
@@ -216,7 +216,8 @@ class Solver(object):
             decode=True)
 
         # write output to file
-        with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open('samples2.txt', 'w', encoding='utf8') as f:
             f.write(f'<Epoch {self.epoch_i}>\n\n')
 
             tqdm.write('\n<Samples>')
@@ -315,6 +316,11 @@ class Solver(object):
                 input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
                 input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
+
+            self.generate_sentence(input_sentences,
+                                   input_sentence_length,
+                                   input_conversation_length,
+                                   target_sentences)
 
             sentence_logits = self.model(
                 input_sentences,
@@ -540,8 +546,7 @@ class VariationalSolver(Solver):
 
         return epoch_loss_history
 
-    def generate_sentence(self, sentences, sentence_length,
-                          input_conversation_length, input_sentences, target_sentences):
+    def generate_sentence(self, sentences, sentence_length, input_conversation_length, input_sentences, target_sentences):
         """Generate output of decoder (single batch)"""
         self.model.eval()
 
@@ -554,7 +559,8 @@ class VariationalSolver(Solver):
             decode=True)
 
         # write output to file
-        with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open('samples.txt', 'a', encoding='utf8') as f:
             f.write(f'<Epoch {self.epoch_i}>\n\n')
 
             tqdm.write('\n<Samples>')
@@ -568,6 +574,36 @@ class VariationalSolver(Solver):
                 f.write(s + '\n')
                 print(s)
             print('')
+
+    def generate_sentence2(self, sentences, sentence_length, input_conversation_length, input_sentences, target_sentences):
+        """Generate output of decoder (single batch)"""
+        self.model.eval()
+
+        # [batch_size, max_seq_len, vocab_size]
+        generated_sentences, _, _, _ = self.model(
+            sentences,
+            sentence_length,
+            input_conversation_length,
+            target_sentences,
+            decode=True)
+
+        # write output to file
+        # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open('test.txt', 'w', encoding='utf8') as f:
+            f.write(f'<Epoch {self.epoch_i}>\n\n')
+
+            tqdm.write('\n<Samples>')
+            for input_sent, target_sent, output_sent in zip(input_sentences, target_sentences, generated_sentences):
+                input_sent = self.vocab.decode(input_sent)
+                target_sent = self.vocab.decode(target_sent)
+                output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
+                s = '\n'.join(['Input sentence: ' + input_sent,
+                               'Ground truth: ' + target_sent,
+                               'Generated response: ' + output_sent + '\n'])
+                f.write(s + '\n')
+                print(s)
+            print('')
+
 
     def evaluate(self):
         self.model.eval()
@@ -601,7 +637,8 @@ class VariationalSolver(Solver):
                 target_sentences = to_var(torch.LongTensor(target_sentences))
                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
 
-            if batch_i == 0:
+#            if batch_i == 0:
+            if True:
                 input_conversations = [conv[:-1] for conv in conversations]
                 input_sentences = [sent for conv in input_conversations for sent in conv]
                 with torch.no_grad():
@@ -680,6 +717,16 @@ class VariationalSolver(Solver):
                 target_sentences = to_var(torch.LongTensor(target_sentences))
                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
 
+#            if batch_i == 0:
+            input_conversations = [conv[:-1] for conv in conversations]
+            input_sentences = [sent for conv in input_conversations for sent in conv]
+            with torch.no_grad():
+                input_sentences = to_var(torch.LongTensor(input_sentences))
+            self.generate_sentence2(sentences,
+                                       sentence_length,
+                                       input_conversation_length,
+                                       input_sentences,
+                                       target_sentences)
             # treat whole batch as one data sample
             weights = []
             for j in range(self.config.importance_sample):
@@ -702,8 +749,8 @@ class VariationalSolver(Solver):
 
             # weights: [n_samples]
             weights = torch.stack(weights, 0)
-            m = np.floor(weights.max())
-            weights = np.log(torch.exp(weights - m).sum())
+            m = np.floor(weights.max()).cuda()
+            weights = np.log(torch.exp(weights - m).sum()).cuda()
             weights = m + weights - np.log(self.config.importance_sample)
             weight_history.append(weights)
 

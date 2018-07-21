@@ -137,6 +137,7 @@ class EncoderRNN(BaseRNNEncoder):
 
         return outputs, hidden
 
+
 class ContextRNN(BaseRNNEncoder):
     def __init__(self, input_size, context_size, rnn=nn.GRU, num_layers=1, dropout=0.0,
                  bidirectional=False, bias=True, batch_first=True):
@@ -176,7 +177,7 @@ class ContextRNN(BaseRNNEncoder):
                 - last hidden state
                 - (h, c) or h
         """
-        batch_size, seq_len, _  = encoder_hidden.size()
+        batch_size, seq_len, _ = encoder_hidden.size()
 
         # Sort for PackedSequence
         conv_length_sorted, indices = conversation_length.sort(descending=True)

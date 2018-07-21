@@ -18,8 +18,10 @@ def normal_logpdf(x, mean, var):
 
 
 def normal_kl_div(mu1, var1,
-                  mu2=to_var(torch.FloatTensor([0.0])),
-                  var2=to_var(torch.FloatTensor([1.0]))):
+                  mu2=torch.FloatTensor([0.0]),
+                  var2=torch.FloatTensor([1.0])):
+    mu2 = to_var(mu2)
+    var2 = to_var(var2)
     one = to_var(torch.FloatTensor([1.0]))
     return torch.sum(0.5 * (torch.log(var2) - torch.log(var1)
                             + (var1 + (mu1 - mu2).pow(2)) / var2 - one), 1)

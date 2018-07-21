@@ -6,6 +6,7 @@ import os
 import pickle
 from models import VariationalModels
 
+
 def load_pickle(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
