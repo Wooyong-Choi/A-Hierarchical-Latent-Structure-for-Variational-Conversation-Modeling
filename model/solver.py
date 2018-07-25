@@ -62,7 +62,7 @@ class Solver(object):
             self.writer = TensorboardWriter(self.config.logdir)
             self.optimizer = self.config.optimizer(
                 filter(lambda p: p.requires_grad, self.model.parameters()),
-                lr=self.config.learning_rate)
+                lr=self.config.learning_rate, weight_decay=self.config.weight_decay) # l2 regularization
 
     def save_model(self, epoch):
         """Save parameters to checkpoint"""
@@ -422,7 +422,6 @@ class Solver(object):
 
         return epoch_average, epoch_extrema, epoch_greedy
 
-
 class VariationalSolver(Solver):
 
     def __init__(self, config, train_data_loader, eval_data_loader, vocab, is_train=True, model=None):
@@ -764,5 +763,455 @@ class VariationalSolver(Solver):
         print_str = f'Word perplexity upperbound using {self.config.importance_sample} importance samples: {word_perplexity:.3f}, kl_div: {epoch_kl_div:.3f}\n'
         print(print_str)
 
-        return word_perplexity
+        return word_perplexity    
+
+class AdemSolver(Solver):
+
+    def __init__(self, config, train_data_loader, eval_data_loader, vocab, is_train=True, model=None):
+        self.config = config
+        self.epoch_i = 0
+        self.train_data_loader = train_data_loader
+        self.eval_data_loader = eval_data_loader
+        self.vocab = vocab
+        self.is_train = is_train
+        self.model = model
+        
+        self.loss = torch.nn.MSELoss()
+        
+    @time_desc_decorator('Build Graph')
+    def build(self, cuda=True, init_by_pretrained_model=False):
+
+        if self.model is None:
+            self.model = getattr(models, self.config.model)(self.config)
+
+            # orthogonal initialiation for hidden weights
+            # input gate bias for GRUs
+            if init_by_pretrained_model:
+                self.model.load_pretrained_model(self.config.pretrained_path)
+            
+            elif self.config.mode == 'train' and self.config.checkpoint is None:
+                print('Parameter initiailization')
+                for name, param in self.model.named_parameters():
+                    if 'weight_hh' in name:
+                        print('\t' + name)
+                        nn.init.orthogonal_(param)
+
+                    # bias_hh is concatenation of reset, input, new gates
+                    # only set the input gate bias to 2.0
+                    if 'bias_hh' in name:
+                        print('\t' + name)
+                        dim = int(param.size(0) / 3)
+                        param.data[dim:2 * dim].fill_(2.0)
+
+        if torch.cuda.is_available() and cuda:
+            self.model.cuda()
+
+        # Overview Parameters
+        print('Model Parameters')
+        for name, param in self.model.named_parameters():
+            print('\t' + name + '\t', list(param.size()))
+
+        if self.config.checkpoint:
+            self.load_model(self.config.checkpoint)
+
+        if self.is_train:
+            self.writer = TensorboardWriter(self.config.logdir)
+            self.optimizer = self.config.optimizer(
+                filter(lambda p: p.requires_grad, self.model.parameters()),
+                lr=self.config.learning_rate, weight_decay=self.config.weight_decay) # l2 regularization        
+
+    @time_desc_decorator('Training Start!')
+    def train(self):
+        epoch_loss_history = []
+        kl_mult = 0.0
+        conv_kl_mult = 0.0
+        for epoch_i in range(self.epoch_i, self.config.n_epoch):
+            self.epoch_i = epoch_i
+            batch_loss_history = []
+            recon_loss_history = []
+            kl_div_history = []
+            kl_div_sent_history = []
+            kl_div_conv_history = []
+            bow_loss_history = []
+            self.model.train()
+            n_total_words = 0
+
+            # self.evaluate()
+
+            for batch_i, (conversations, conversation_length, sentence_length, scores) \
+                    in enumerate(tqdm(self.train_data_loader, ncols=80)):
+                # conversations: (batch_size) list of conversations
+                #   conversation: list of sentences
+                #   sentence: list of tokens
+                # conversation_length: list of int
+                # sentence_length: (batch_size) list of conversation list of sentence_lengths
+
+#                 target_conversations = [conv[1:] for conv in conversations]
+#                 print("\nsolver line 464 score", len(scores))
+#                 print("solver line 464 conversation_length", len(conversation_length))
+#                 print("solver line 464 conversations[0]", conversations[0])
+#                 print("solver line 464 conversations[0]", len(conversations[0]))
+#                 print("solver line 464 conversations_length[0]", conversation_length[0])
+                # temp
+#                 scores = torch.randint(1,5, (len(conversation_length),)).cuda()
+#                 print("solver line 464 scores", scores)
+#                 print("solver line 464 scores", scores.size())
+
+
+                # flatten input and target conversations
+                
+                sentences = [sent for conv in conversations for sent in conv[:-2]]
+                input_conversation_length = [l -1 for l in conversation_length]
+#                 target_sentences = [sent for conv in target_conversations for sent in conv]
+#                 target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
+                sent_length = [l for len_list in sentence_length for l in len_list[:-2]]
+                
+                gold_sentences = [conv[-2] for conv in conversations]
+                gold_sentence_length = [len_list[-2] for len_list in sentence_length]
+                
+                generated_sentences = [conv[-1] for conv in conversations]
+                generated_sentence_length = [len_list[-2] for len_list in sentence_length]
+
+#                 print("solver line 830 gold", gold_sentences)
+                sentences = to_var(torch.LongTensor(sentences))
+                sent_length = to_var(torch.LongTensor(sent_length))
+                input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
+                gold_sentences = to_var(torch.LongTensor(gold_sentences))
+                gold_sentence_length = to_var(torch.LongTensor(gold_sentence_length))
+                generated_sentences = to_var(torch.LongTensor(generated_sentences))
+                generated_sentence_length = to_var(torch.LongTensor(generated_sentence_length))
+                scores = to_var(torch.FloatTensor(scores))
+                # scores = to_var(torch.LongTensor(scores))
+#                 print("solver line 839 gold", gold_sentences)
+                               
+#                 target_sentences = to_var(torch.LongTensor(target_sentences))
+#                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
+
+                # reset gradient
+                self.optimizer.zero_grad()
+
+                model_scores = self.model(
+                    sentences,
+                    sent_length,
+                    input_conversation_length,
+                    gold_sentences,
+                    gold_sentence_length,
+                    generated_sentences,
+                    generated_sentence_length,
+                )
+                
+                
+                loss = self.loss(model_scores, scores)
+#                 input("solver line 839") 
+                
+#                 recon_loss, n_words = masked_cross_entropy(
+#                     sentence_logits,
+#                     target_sentences,
+#                     target_sentence_length)
+
+                batch_loss = loss
+                batch_loss_history.append(batch_loss.item())
+#                 recon_loss_history.append(recon_loss.item())
+#                 kl_div_history.append(kl_div.item())
+                n_total_words += 1
+
+#                 if self.config.bow:
+#                     bow_loss = self.model.compute_bow_loss(target_conversations)
+#                     batch_loss += bow_loss
+#                     bow_loss_history.append(bow_loss.item())
+
+                assert not isnan(batch_loss.item())
+
+                if batch_i % self.config.print_every == 0:
+                    print_str = f'Epoch: {epoch_i+1}, iter {batch_i}: loss = {batch_loss.item():.3f}'
+                    if self.config.bow:
+                        print_str += f', bow_loss = {bow_loss.item() / n_words.item():.3f}'
+                    tqdm.write(print_str)
+
+                # Back-propagation
+                batch_loss.backward()
+
+                # Gradient cliping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+
+                # Run optimizer
+                self.optimizer.step()
+                kl_mult = min(kl_mult + 1.0 / self.config.kl_annealing_iter, 1.0)
+
+            epoch_loss = np.sum(batch_loss_history) / n_total_words
+            epoch_loss_history.append(epoch_loss)
+
+#             epoch_recon_loss = np.sum(recon_loss_history) / n_total_words
+#             epoch_kl_div = np.sum(kl_div_history) / n_total_words
+
+#             self.kl_mult = kl_mult
+            self.epoch_loss = epoch_loss
+#             self.epoch_recon_loss = epoch_recon_loss
+#             self.epoch_kl_div = epoch_kl_div
+
+            print_str = f'Epoch {epoch_i+1} loss average: {epoch_loss:.3f}'
+            if bow_loss_history:
+                self.epoch_bow_loss = np.sum(bow_loss_history) / n_total_words
+                print_str += f', bow_loss = {self.epoch_bow_loss:.3f}'
+            print(print_str)
+
+            if epoch_i % self.config.save_every_epoch == 0:
+                self.save_model(epoch_i + 1)
+
+            print('\n<Validation>...')
+            self.validation_loss = self.evaluate()
+
+            if epoch_i % self.config.plot_every_epoch == 0:
+                    self.write_summary(epoch_i)
+
+        return epoch_loss_history
+
+    def generate_sentence(self, sentences, sentence_length, input_conversation_length, input_sentences, target_sentences):
+        """Generate output of decoder (single batch)"""
+        self.model.eval()
+
+        # [batch_size, max_seq_len, vocab_size]
+        generated_sentences, _, _, _ = self.model(
+            sentences,
+            sentence_length,
+            input_conversation_length,
+            target_sentences,
+            decode=True)
+
+        # write output to file
+        # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open('samples.txt', 'a', encoding='utf8') as f:
+            f.write(f'<Epoch {self.epoch_i}>\n\n')
+
+            tqdm.write('\n<Samples>')
+            for input_sent, target_sent, output_sent in zip(input_sentences, target_sentences, generated_sentences):
+                input_sent = self.vocab.decode(input_sent)
+                target_sent = self.vocab.decode(target_sent)
+                output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
+                s = '\n'.join(['Input sentence: ' + input_sent,
+                               'Ground truth: ' + target_sent,
+                               'Generated response: ' + output_sent + '\n'])
+                f.write(s + '\n')
+                print(s)
+            print('')
+
+    def generate_sentence2(self, sentences, sentence_length, input_conversation_length, gold_sentences, gold_sentence_length, generated_sentences, generated_sentence_length,input_sentences, scores):
+        """Generate output of decoder (single batch)"""
+        self.model.eval()
+
+        # [batch_size, max_seq_len, vocab_size]
+        model_scores = self.model(
+                sentences,
+                sentence_length,
+                input_conversation_length,
+                gold_sentences,
+                gold_sentence_length,
+                generated_sentences,
+                generated_sentence_length,
+        )
+
+        # write output to file
+        # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+#         with open('test.txt', 'w', encoding='utf8') as f:
+        with open(self.config.test_res_path, 'w', encoding='utf8') as f:
+            f.write(f'<Epoch {self.epoch_i} test_len {gold_sentences.size(0)}>\n\n')
+
+            tqdm.write('\n<Samples>')
+            for target_sent, output_sent, model_score, gold_score in zip(gold_sentences, generated_sentences, model_scores, scores):
+                output_sent = self.vocab.decode(output_sent)
+                target_sent = self.vocab.decode(target_sent)
+#                 output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
+#                 s = '\n'.join(['Input sentence: ' + input_sent,
+#                                'Ground truth: ' + target_sent,
+#                                'Generated response: ' + output_sent + '\n'])
+                s = '\n'.join(['Ground truth: ' + target_sent,
+                               'Generated response: ' + output_sent,
+                               'Gold Score: ' + str(gold_score.item()),
+                               'Score: ' + str(model_score.item()) + '\n'])
+                f.write(s + '\n')
+                print(s)
+            print('')
+            
+        with open(self.config.test_raw_score_path, 'w', encoding='utf8') as f:
+            for model_score in model_scores:
+                print(model_score.item(), file=f)
+
+
+    def evaluate(self):
+        self.model.eval()
+        batch_loss_history = []
+        recon_loss_history = []
+        kl_div_history = []
+        bow_loss_history = []
+        n_total_words = 0
+            
+        for batch_i, (conversations, conversation_length, sentence_length, scores) \
+                in enumerate(tqdm(self.eval_data_loader, ncols=80)):
+            # conversations: (batch_size) list of conversations
+            #   conversation: list of sentences
+            #   sentence: list of tokens
+            # conversation_length: list of int
+            # sentence_length: (batch_size) list of conversation list of sentence_lengths
+
+            # temp
+#             scores = torch.randint(1,5, (len(conversation_length),)).cuda()
+            # flatten input and target conversations
+                
+            sentences = [sent for conv in conversations for sent in conv[:-2]]
+            input_conversation_length = [l -1 for l in conversation_length]
+#             target_sentences = [sent for conv in target_conversations for sent in conv]
+#             target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
+            sent_length = [l for len_list in sentence_length for l in len_list[:-2]]
+                
+            gold_sentences = [conv[-2] for conv in conversations]
+            gold_sentence_length = [len_list[-2] for len_list in sentence_length]
+                
+            generated_sentences = [conv[-1] for conv in conversations]
+            generated_sentence_length = [len_list[-2] for len_list in sentence_length]
+
+            with torch.no_grad():
+                sentences = to_var(torch.LongTensor(sentences))
+                sent_length = to_var(torch.LongTensor(sent_length))
+                input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
+                gold_sentences = to_var(torch.LongTensor(gold_sentences))
+                gold_sentence_length = to_var(torch.LongTensor(gold_sentence_length))
+                generated_sentences = to_var(torch.LongTensor(generated_sentences))
+                generated_sentence_length = to_var(torch.LongTensor(generated_sentence_length))
+                scores = to_var(torch.FloatTensor(scores))
+
+#            if batch_i == 0:
+
+                # reset gradient
+
+            model_scores = self.model(
+                sentences,
+                sent_length,
+                input_conversation_length,
+                gold_sentences,
+                gold_sentence_length,
+                generated_sentences,
+                generated_sentence_length,
+            )
+            loss = self.loss(model_scores, scores)
+            
+            batch_loss =loss
+#             if self.config.bow:
+#                 bow_loss = self.model.compute_bow_loss(target_conversations)
+#                 bow_loss_history.append(bow_loss.item())
+
+            assert not isnan(batch_loss.item())
+            batch_loss_history.append(batch_loss.item())
+#             recon_loss_history.append(recon_loss.item())
+#             kl_div_history.append(kl_div.item())
+            n_total_words += 1
+
+        epoch_loss = np.sum(batch_loss_history) / n_total_words
+#         epoch_recon_loss = np.sum(recon_loss_history) / n_total_words
+#         epoch_kl_div = np.sum(kl_div_history) / n_total_words
+
+        print_str = f'Validation loss: {epoch_loss:.3f}'
+        if bow_loss_history:
+            epoch_bow_loss = np.sum(bow_loss_history) / n_total_words
+            print_str += f', bow_loss = {epoch_bow_loss:.3f}'
+        print(print_str)
+        print('\n')
+
+        return epoch_loss
+
+    def importance_sample(self):
+        ''' Perform importance sampling to get tighter bound
+        '''
+        self.model.eval()
+        batch_loss_history = []
+        recon_loss_history = []
+        kl_div_history = []
+        bow_loss_history = []
+        n_total_words = 0
+            
+        for batch_i, (conversations, conversation_length, sentence_length, scores) \
+                in enumerate(tqdm(self.eval_data_loader, ncols=80)):
+            # conversations: (batch_size) list of conversations
+            #   conversation: list of sentences
+            #   sentence: list of tokens
+            # conversation_length: list of int
+            # sentence_length: (batch_size) list of conversation list of sentence_lengths
+
+            # temp
+#             scores = torch.randint(1,5, (len(conversation_length),)).cuda()
+            # flatten input and target conversations
+                
+            sentences = [sent for conv in conversations for sent in conv[:-2]]
+            input_conversation_length = [l -1 for l in conversation_length]
+#             target_sentences = [sent for conv in target_conversations for sent in conv]
+#             target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
+            sent_length = [l for len_list in sentence_length for l in len_list[:-2]]
+                
+            gold_sentences = [conv[-2] for conv in conversations]
+            gold_sentence_length = [len_list[-2] for len_list in sentence_length]
+                
+            generated_sentences = [conv[-1] for conv in conversations]
+            generated_sentence_length = [len_list[-2] for len_list in sentence_length]
+
+            with torch.no_grad():
+                sentences = to_var(torch.LongTensor(sentences))
+                sent_length = to_var(torch.LongTensor(sent_length))
+                input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
+                gold_sentences = to_var(torch.LongTensor(gold_sentences))
+                gold_sentence_length = to_var(torch.LongTensor(gold_sentence_length))
+                generated_sentences = to_var(torch.LongTensor(generated_sentences))
+                generated_sentence_length = to_var(torch.LongTensor(generated_sentence_length))
+                scores = to_var(torch.FloatTensor(scores))
+
+#            if batch_i == 0:
+            input_conversations = [conv[:-2] for conv in conversations]
+            input_sentences = [sent for conv in input_conversations for sent in conv]
+            with torch.no_grad():
+                input_sentences = to_var(torch.LongTensor(input_sentences))
+            self.generate_sentence2(sentences,
+                                       sent_length,
+                                       input_conversation_length,
+                                       gold_sentences,
+                                       gold_sentence_length,
+                                       generated_sentences,
+                                       generated_sentence_length,      
+                                       input_sentences,
+                                       scores)
+            # treat whole batch as one data sample
+#             weights = []
+#             for j in range(self.config.importance_sample):
+#                 sentence_logits, kl_div, log_p_z, log_q_zx = self.model(
+#                     sentences,
+#                     sentence_length,
+#                     input_conversation_length,
+#                     target_sentences)
+
+#                 recon_loss, n_words = masked_cross_entropy(
+#                     sentence_logits,
+#                     target_sentences,
+#                     target_sentence_length)
+
+#                 log_w = (-recon_loss.sum() + log_p_z - log_q_zx).data
+#                 weights.append(log_w)
+#                 if j == 0:
+#                     n_total_words += n_words.item()
+#                     kl_div_history.append(kl_div.item())
+
+#             # weights: [n_samples]
+#             weights = torch.stack(weights, 0)
+#             m = np.floor(weights.max()).cuda()
+#             weights = np.log(torch.exp(weights - m).sum()).cuda()
+#             weights = m + weights - np.log(self.config.importance_sample)
+#             weight_history.append(weights)
+
+#         print(f'Number of words: {n_total_words}')
+#         bits_per_word = -np.sum(weight_history) / n_total_words
+#         print(f'Bits per word: {bits_per_word:.3f}')
+#         word_perplexity = np.exp(bits_per_word)
+
+#         epoch_kl_div = np.sum(kl_div_history) / n_total_words
+
+#         print_str = f'Word perplexity upperbound using {self.config.importance_sample} importance samples: {word_perplexity:.3f}, kl_div: {epoch_kl_div:.3f}\n'
+#         print(print_str)
+
+        return None
 

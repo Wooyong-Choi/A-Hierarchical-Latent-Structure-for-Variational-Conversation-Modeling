@@ -88,7 +88,7 @@ class EncoderRNN(BaseRNNEncoder):
                         dropout=dropout,
                         bidirectional=bidirectional)
 
-    def forward(self, inputs, input_length, hidden=None):
+    def forward(self, inputs, input_length, hidden=None, flat=False):
         """
         Args:
             inputs (Variable, LongTensor): [num_setences, max_seq_len]
@@ -121,7 +121,8 @@ class EncoderRNN(BaseRNNEncoder):
 
         # outputs: [batch, seq_len, hidden_size * num_directions]
         # hidden: [num_layers * num_directions, batch, hidden_size]
-        self.rnn.flatten_parameters()
+        if flat:
+            self.rnn.flatten_parameters()
         outputs, hidden = self.rnn(rnn_input, hidden)
         outputs, outputs_lengths = pad_packed_sequence(outputs, batch_first=self.batch_first)
 

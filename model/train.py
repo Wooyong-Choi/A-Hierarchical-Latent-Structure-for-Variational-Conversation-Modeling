@@ -1,5 +1,7 @@
 from solver import *
 from data_loader import get_loader
+from adem_data_loader import get_adem_loader
+
 from configs import get_config
 from utils import Vocab
 import os
@@ -26,29 +28,54 @@ if __name__ == '__main__':
 
     config.vocab_size = vocab.vocab_size
 
-    train_data_loader = get_loader(
-        sentences=load_pickle(config.sentences_path),
-        conversation_length=load_pickle(config.conversation_length_path),
-        sentence_length=load_pickle(config.sentence_length_path),
-        vocab=vocab,
-        batch_size=config.batch_size)
+    if config.model == "ADEM":
+        train_data_loader = get_adem_loader(
+            sentences=load_pickle(config.sentences_path),
+            conversation_length=load_pickle(config.conversation_length_path),
+            sentence_length=load_pickle(config.sentence_length_path),
+            score=load_pickle(config.score_path),
+            vocab=vocab,
+            batch_size=config.batch_size)
 
-    eval_data_loader = get_loader(
-        sentences=load_pickle(val_config.sentences_path),
-        conversation_length=load_pickle(val_config.conversation_length_path),
-        sentence_length=load_pickle(val_config.sentence_length_path),
-        vocab=vocab,
-        batch_size=val_config.eval_batch_size,
-        shuffle=False)
+        eval_data_loader = get_adem_loader(
+            sentences=load_pickle(val_config.sentences_path),
+            conversation_length=load_pickle(val_config.conversation_length_path),
+            sentence_length=load_pickle(val_config.sentence_length_path),
+            score=load_pickle(config.score_path),
+            vocab=vocab,
+            batch_size=val_config.eval_batch_size,
+            shuffle=False)        
+        
+    else:    
+        train_data_loader = get_loader(
+            sentences=load_pickle(config.sentences_path),
+            conversation_length=load_pickle(config.conversation_length_path),
+            sentence_length=load_pickle(config.sentence_length_path),
+            vocab=vocab,
+            batch_size=config.batch_size)
+
+        eval_data_loader = get_loader(
+            sentences=load_pickle(val_config.sentences_path),
+            conversation_length=load_pickle(val_config.conversation_length_path),
+            sentence_length=load_pickle(val_config.sentence_length_path),
+            vocab=vocab,
+            batch_size=val_config.eval_batch_size,
+            shuffle=False)
 
     # for testing
     # train_data_loader = eval_data_loader
     if config.model in VariationalModels:
-        solver = VariationalSolver
+        
+        if config.model == "ADEM":
+            print("train line:69 config.model", config.model)
+            solver = AdemSolver
+        else:
+            solver = VariationalSolver
+        
     else:
         solver = Solver
 
     solver = solver(config, train_data_loader, eval_data_loader, vocab=vocab, is_train=True)
 
-    solver.build()
+    solver.build(init_by_pretrained_model=True)
     solver.train()

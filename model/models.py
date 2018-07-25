@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
 from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID
+from collections import OrderedDict
 import layers as layers
 import numpy as np
 import random
 
-VariationalModels = ['VHRED', 'VHCR']
+VariationalModels = ['VHRED', 'VHCR', 'ADEM']
 
 class HRED(nn.Module):
     def __init__(self, config):
@@ -760,3 +761,190 @@ class VHCR(nn.Module):
 
         samples = torch.stack(samples, 1)
         return samples
+
+    
+class ADEM(nn.Module):
+    def __init__(self, config):
+        super(ADEM, self).__init__()
+        
+        self.num_layers = config.num_layers
+        self.rnn = config.rnn
+        self.bidirectional = config.bidirectional
+        self.dropout = config.dropout
+        
+        
+        # Encoder
+        self.vocab_size = config.vocab_size
+        self.embed_size = config.embedding_size
+        self.hidden_size = config.encoder_hidden_size
+        self.bidirectional = config.bidirectional
+        
+        self.encoder = layers.EncoderRNN(self.vocab_size,
+                                         self.embed_size,
+                                         self.hidden_size,
+                                         self.rnn,
+                                         self.num_layers,
+                                         self.bidirectional,
+                                         self.dropout)
+        
+        # Context Encoder
+        self.context_size = config.context_size
+
+        context_input_size = (self.num_layers
+                              * self.hidden_size
+                              * self.encoder.num_directions)
+        self.context_encoder = layers.ContextRNN(context_input_size,
+                                                 self.context_size,
+                                                 self.rnn,
+                                                 self.num_layers,
+                                                 self.dropout,
+                                                )
+        bi_dir = 2 if self.bidirectional else 1
+        self.M = torch.zeros(self.hidden_size, self.hidden_size * bi_dir, requires_grad=True).cuda()
+        self.N = torch.zeros(self.hidden_size * bi_dir, self.hidden_size * bi_dir, requires_grad=True).cuda()
+        
+        # initialize with identity
+        nn.init.eye_(self.M)
+        nn.init.eye_(self.N)
+        
+        self.sigmoid = torch.nn.Sigmoid()
+        
+    def get_score(self, context, ref_response, model_response, alpha=0, beta=1):
+        """
+        Args:
+            context: (Variable, FloatTensor) [batch, 1, hidden]
+            ref_response: (Variable, FloatTensor) [batch, 1, hidden]
+            model_response: (Variable, FloatTensor) [batch, 1, hidden]
+        Return:
+            decoder_outputs: (Variable, FloatTensor)
+                - train: [batch_size, seq_len, vocab_size]
+                - eval: [batch_size, seq_len]
+        """        
+        
+#         assert context.size() == ref_response.size()
+#         assert context.size() == model_response.size()
+#         assert context.size(1) == 1
+        
+#         def to_matrix(tensor):
+#             if tensor.dim() == 3:
+#                 return tensor.squeeze(0)
+#             else:
+#                 return tensor
+        
+        res1 = torch.matmul(context, self.M)
+        res2 = torch.matmul(res1, model_response.transpose(1,2))
+        res3 = torch.matmul(ref_response, self.N)
+        res4 = torch.matmul(res3, model_response.transpose(1,2))
+         
+#         score = (res2+res4 - alpha) / beta
+        score = self.sigmoid(res2+res4) * 4 + 1
+        
+        return score.view(-1)
+    
+    def _fix_enc_hidden(self, h):
+        # The encoder hidden is  (layers*directions) x batch x dim.
+        # We need to convert it to layers x batch x (directions*dim).
+        if self.bidirectional:
+            h = torch.cat([h[0:h.size(0):2], h[1:h.size(0):2]], 2)
+        return h    
+   
+
+    def forward(self, sentences, sentence_length,
+                input_conversation_length, gold_sentences, gold_sentence_length, generated_sentences, generated_sentence_length,
+                    decode=False):
+        """
+        Args:
+            sentences: (Variable, LongTensor) [num_sentences + batch_size, seq_len]
+            target_sentences: (Variable, LongTensor) [num_sentences, seq_len]
+        Return:
+            decoder_outputs: (Variable, FloatTensor)
+                - train: [batch_size, seq_len, vocab_size]
+                - eval: [batch_size, seq_len]
+        """
+        batch_size = input_conversation_length.size(0)
+        num_sentences = sentences.size(0) - batch_size
+        max_len = input_conversation_length.data.max().item()
+
+        # encoder_outputs: [num_sentences + batch_size, max_source_length, hidden_size]
+        # encoder_hidden: [num_layers * direction, num_sentences + batch_size, hidden_size]
+#         print("model line 825 sent size", sentences.size())
+#         print("model line 825 gold size", gold_sentences.size())
+#         print("model line 825 gen size", generated_sentences.size())
+        
+        encoder_outputs, encoder_hidden = self.encoder(sentences,
+                                                       sentence_length, flat=True)
+        
+        # for bi-directional rnn
+        encoder_hidden = self._fix_enc_hidden(encoder_hidden)
+
+        
+        _, gold_encoder_hidden = self.encoder(gold_sentences, gold_sentence_length)
+        # for bi-directional rnn
+        gold_encoder_hidden = self._fix_enc_hidden(gold_encoder_hidden)      
+
+        
+        _, gen_encoder_hidden = self.encoder(generated_sentences, generated_sentence_length)
+        # for bi-directional rnn
+        gen_encoder_hidden = self._fix_enc_hidden(gen_encoder_hidden)
+
+#         print("model line 874 encoder hidden", encoder_hidden.size()) # batch(src num) * hidden
+        # encoder_hidden: [num_sentences + batch_size, num_layers * direction * hidden_size]
+        encoder_hidden = encoder_hidden.transpose(
+            1, 0).contiguous().view(num_sentences + batch_size, -1)
+        
+#         print("model line 825 sent size", sentences.size())
+#         print("model line 825 encoder hidden", encoder_hidden.size()) # batch(src num) * hidden
+#         print("model line 825 gold hidden", gold_encoder_hidden.size()) #  layer * batch * hidden
+#         print("model line 825 gen hidden", gen_encoder_hidden.size()) #  layer * batch * hidden
+        
+        # pad and pack encoder_hidden
+        start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
+                                        input_conversation_length[:-1] + 1)), 0)
+        
+#         print("model line 831 start", start)
+#         print("model line 831 input_conversation_length", input_conversation_length)
+#         print("model line 831 input_conversation_length", torch.sum(input_conversation_length))
+        # encoder_hidden: [batch_size, max_len + 1, num_layers * direction * hidden_size]
+        encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l + 1), max_len + 1)
+                                      for s, l in zip(start.data.tolist(),
+                                                      input_conversation_length.data.tolist())], 0)
+
+        # encoder_hidden_inference: [batch_size, max_len, num_layers * direction * hidden_size]
+#         encoder_hidden_inference = encoder_hidden[:, 1:, :]
+#         encoder_hidden_inference_flat = torch.cat(
+#             [encoder_hidden_inference[i, :l, :] for i, l in enumerate(input_conversation_length.data)])
+
+        # encoder_hidden_input: [batch_size, max_len, num_layers * direction * hidden_size]
+#         encoder_hidden_input = encoder_hidden[:, :-1, :]
+
+        # context_outputs: [batch_size, max_len, context_size]
+#         context_outputs, context_last_hidden = self.context_encoder(encoder_hidden_input,
+#                                                                     input_conversation_length)
+        context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,
+                                                                    input_conversation_length)        
+        # flatten outputs
+        # context_outputs: [num_sentences, context_size]
+#         context_outputs = torch.cat([context_outputs[i, :l, :]
+#                                      for i, l in enumerate(input_conversation_length.data)])
+        
+#         print("model line 848 encoder hidden", encoder_hidden.size()) # batch * len * hidden
+#         print("model line 848 context last hidden", context_last_hidden.size()) # layer * batch * hidden
+        
+        # matmul
+        model_score = self.get_score(context_last_hidden.transpose(0,1), gold_encoder_hidden.transpose(0,1), gen_encoder_hidden.transpose(0,1))
+#         print("model line 902 model score", model_score)
+#         print("model line 902 model score size", model_score.size())
+
+#         return torch.matmul(torch.matmul(context_last_hidden.transpose(0,1), self.M), context_last_hidden.transpose(0,1).transpose(1,2)).view(-1)
+        return model_score
+        
+    def load_pretrained_model(self, model_path):
+        vhred_state = torch.load(model_path)
+        
+        encoder_state = OrderedDict()
+        for k, v in vhred_state.items():
+            if k.find('encoder') != -1:
+                encoder_state[k] = v
+                
+        self.load_state_dict(encoder_state)
+        

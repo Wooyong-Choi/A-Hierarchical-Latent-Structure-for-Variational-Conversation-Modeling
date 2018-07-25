@@ -15,6 +15,7 @@ data_dict = {
     'ubuntu': data_dir.joinpath('ubuntu'),
     'smart_ko': data_dir.joinpath('smart_ko'), 
     'smart_ko_adem': data_dir.joinpath('smart_ko_adem'), 
+    'smart_ko_adem_prev': data_dir.joinpath('smart_ko_adem_prev'), 
     'smart_ko_word': data_dir.joinpath('smart_ko_word')
 }
 optimizer_dict = {'RMSprop': optim.RMSprop, 'Adam': optim.Adam}
@@ -60,6 +61,9 @@ class Config(object):
         self.sentences_path = self.data_dir.joinpath('sentences.pkl')
         self.sentence_length_path = self.data_dir.joinpath('sentence_length.pkl')
         self.conversation_length_path = self.data_dir.joinpath('conversation_length.pkl')
+        
+        if self.model == "ADEM":
+            self.score_path = self.data_dir.joinpath('score.pkl')
 
         # Save path
         if self.mode == 'train' and self.checkpoint is None:
@@ -96,9 +100,11 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--eval_batch_size', type=int, default=80)
     parser.add_argument('--n_epoch', type=int, default=30)
     parser.add_argument('--learning_rate', type=float, default=1e-4)
+    parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--clip', type=float, default=1.0)
     parser.add_argument('--checkpoint', type=str, default=None)
+    parser.add_argument('--pretrained_path', type=str, default=None)
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)
@@ -109,7 +115,7 @@ def get_config(parse=True, **optional_kwargs):
 
     # Model
     parser.add_argument('--model', type=str, default='VHCR',
-                        help='one of {HRED, VHRED, VHCR}')
+                        help='one of {HRED, VHRED, VHCR, ADEM}')
     # Currently does not support lstm
     parser.add_argument('--rnn', type=str, default='gru')
     parser.add_argument('--rnncell', type=str, default='gru')
@@ -145,6 +151,10 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--print_every', type=int, default=100)
     parser.add_argument('--plot_every_epoch', type=int, default=1)
     parser.add_argument('--save_every_epoch', type=int, default=1)
+    
+    # eval
+    parser.add_argument('--test_res_path', type=str, default="test.txt")
+    parser.add_argument('--test_raw_score_path', type=str, default="raw_res.txt")
 
     # Data
     parser.add_argument('--data', type=str, default='ubuntu')

@@ -35,7 +35,8 @@ class DialogEvalDataset(DialogDataset):
 
 def get_adem_loader(sentences, conversation_length, sentence_length, score, vocab, batch_size=100, data=None, shuffle=True):
     """Load DataLoader of given DialogEvalDataset"""
-
+    print("adem_data_loader line:38 adem loader")
+    
     def collate_fn(data):
         """
         Collate list of data in to batch
@@ -59,6 +60,8 @@ def get_adem_loader(sentences, conversation_length, sentence_length, score, voca
         return sentences, conversation_length, sentence_length, score
 
     adem_dataset = DialogEvalDataset(sentences, conversation_length, sentence_length, score, vocab, data=data)
+#     print("adem_data_loader line:63", score)
+#     input("adem_data_loader line:64")
 
     data_adem_loader = DataLoader(
         dataset=adem_dataset,
