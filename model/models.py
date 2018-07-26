@@ -809,6 +809,9 @@ class ADEM(nn.Module):
         
         self.sigmoid = torch.nn.Sigmoid()
         
+        # score mode
+        self.scoring_model = config.scoring_mode
+        
     def get_score(self, context, ref_response, model_response, alpha=0, beta=1):
         """
         Args:
@@ -836,8 +839,12 @@ class ADEM(nn.Module):
         res3 = torch.matmul(ref_response, self.N)
         res4 = torch.matmul(res3, model_response.transpose(1,2))
          
-#         score = (res2+res4 - alpha) / beta
-        score = self.sigmoid(res2+res4) * 4 + 1
+        if self.scoring_model == "origin":
+#             print("origin")
+            score = (res2+res4 - alpha) / beta
+        elif self.scoring_model == "sigmoid":
+#             print("sigmoid")
+            score = self.sigmoid(res2+res4) * 4 + 1
         
         return score.view(-1)
     

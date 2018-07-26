@@ -995,7 +995,7 @@ class AdemSolver(Solver):
                 print(s)
             print('')
 
-    def generate_sentence2(self, sentences, sentence_length, input_conversation_length, gold_sentences, gold_sentence_length, generated_sentences, generated_sentence_length,input_sentences, scores, conversations):
+    def generate_sentence2(self, sentences, sentence_length, input_conversation_length, gold_sentences, gold_sentence_length, generated_sentences, generated_sentence_length,input_sentences, scores, conversations, is_first=False):
         """Generate output of decoder (single batch)"""
         self.model.eval()
 
@@ -1014,13 +1014,15 @@ class AdemSolver(Solver):
         # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
 #         with open('test.txt', 'w', encoding='utf8') as f:
         with open(self.config.test_res_path, 'a', encoding='utf8') as f:
-            f.write(f'<Epoch {self.epoch_i} test_len {gold_sentences.size(0)}>\n\n')
+            if is_first:
+                f.write(f'<Epoch {self.epoch_i} test_len {gold_sentences.size(0)}>\n\n')
 
             tqdm.write('\n<Samples>')
             for context, target_sent, output_sent, model_score, gold_score in zip(conversations, gold_sentences, generated_sentences, model_scores, scores):
+                
                 output_sent = self.vocab.decode(output_sent)
                 target_sent = self.vocab.decode(target_sent)
-                print(context)
+#                 print(context)
                 context_sent = '\n'.join([self.vocab.decode(sent) for sent in context[:-2]])
 #                 output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
 #                 s = '\n'.join(['Input sentence: ' + input_sent,
@@ -1036,7 +1038,8 @@ class AdemSolver(Solver):
             print('')
             
         with open(self.config.test_raw_score_path, 'a', encoding='utf8') as f:
-            print(",".join(["Ground truth", "Generated response", "Gold Score", "Score"]), file=f)
+            if is_first:
+                print(",".join(["Ground truth", "Generated response", "Gold Score", "Score"]), file=f)
             for context, target_sent, output_sent, model_score, gold_score in zip(conversations, gold_sentences, generated_sentences, model_scores, scores):
                 output_sent = self.vocab.decode(output_sent)
                 target_sent = self.vocab.decode(target_sent)
@@ -1142,6 +1145,7 @@ class AdemSolver(Solver):
         bow_loss_history = []
         n_total_words = 0
             
+        is_first = True
         for batch_i, (conversations, conversation_length, sentence_length, scores) \
                 in enumerate(tqdm(self.eval_data_loader, ncols=80)):
             # conversations: (batch_size) list of conversations
@@ -1189,7 +1193,8 @@ class AdemSolver(Solver):
                                        generated_sentences,
                                        generated_sentence_length,      
                                        input_sentences,
-                                       scores, conversations)
+                                       scores, conversations, is_first)
+            is_first = False
             # treat whole batch as one data sample
 #             weights = []
 #             for j in range(self.config.importance_sample):

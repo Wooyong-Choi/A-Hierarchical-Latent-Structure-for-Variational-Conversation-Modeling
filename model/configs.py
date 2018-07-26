@@ -63,7 +63,7 @@ class Config(object):
         self.conversation_length_path = self.data_dir.joinpath('conversation_length.pkl')
         
         if self.model == "ADEM":
-            self.score_path = self.data_dir.joinpath('score.pkl')
+            self.score_path = self.data_dir.joinpath(self.score_file)
 
         # Save path
         if self.mode == 'train' and self.checkpoint is None:
@@ -116,6 +116,9 @@ def get_config(parse=True, **optional_kwargs):
     # Model
     parser.add_argument('--model', type=str, default='VHCR',
                         help='one of {HRED, VHRED, VHCR, ADEM}')
+    parser.add_argument('--model_name', type=str, required=True)   
+    
+    
     # Currently does not support lstm
     parser.add_argument('--rnn', type=str, default='gru')
     parser.add_argument('--rnncell', type=str, default='gru')
@@ -158,6 +161,9 @@ def get_config(parse=True, **optional_kwargs):
 
     # Data
     parser.add_argument('--data', type=str, default='ubuntu')
+    
+    parser.add_argument('--score_file', type=str, default='score.pkl')
+    parser.add_argument('--scoring_mode', type=str, default='origin', choices=['origin', 'sigmoid'])
 
     # Parse arguments
     if parse:
