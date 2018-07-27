@@ -811,6 +811,7 @@ class ADEM(nn.Module):
         
         # score mode
         self.scoring_model = config.scoring_mode
+        self.score_range = config.score_range
         
     def get_score(self, context, ref_response, model_response, alpha=0, beta=1):
         """
@@ -844,7 +845,10 @@ class ADEM(nn.Module):
             score = (res2+res4 - alpha) / beta
         elif self.scoring_model == "sigmoid":
 #             print("sigmoid")
-            score = self.sigmoid(res2+res4) * 4 + 1
+            if self.score_range == '15':
+                score = self.sigmoid(res2+res4) * 4 + 1
+            elif self.score_range == '02':
+                score = self.sigmoid(res2+res4) * 2
         
         return score.view(-1)
     

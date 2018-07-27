@@ -533,8 +533,10 @@ class VariationalSolver(Solver):
                 self.epoch_bow_loss = np.sum(bow_loss_history) / n_total_words
                 print_str += f', bow_loss = {self.epoch_bow_loss:.3f}'
             print(print_str)
+            print("@@")
 
             if epoch_i % self.config.save_every_epoch == 0:
+                print("@@@")
                 self.save_model(epoch_i + 1)
 
             print('\n<Validation>...')
@@ -955,7 +957,7 @@ class AdemSolver(Solver):
                 print_str += f', bow_loss = {self.epoch_bow_loss:.3f}'
             print(print_str)
 
-            if epoch_i % self.config.save_every_epoch == 0:
+            if (epoch_i + 1) % self.config.save_every_epoch == 0:
                 self.save_model(epoch_i + 1)
 
             print('\n<Validation>...')
@@ -1009,11 +1011,15 @@ class AdemSolver(Solver):
                 generated_sentences,
                 generated_sentence_length,
         )
+        if is_first:
+            read_mode = 'w'
+        else:
+            read_mode = 'a'
 
         # write output to file
         # with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
 #         with open('test.txt', 'w', encoding='utf8') as f:
-        with open(self.config.test_res_path, 'a', encoding='utf8') as f:
+        with open(self.config.test_res_path, read_mode, encoding='utf8') as f:
             if is_first:
                 f.write(f'<Epoch {self.epoch_i} test_len {gold_sentences.size(0)}>\n\n')
 
@@ -1037,7 +1043,7 @@ class AdemSolver(Solver):
                 print(s)
             print('')
             
-        with open(self.config.test_raw_score_path, 'a', encoding='utf8') as f:
+        with open(self.config.test_raw_score_path, read_mode, encoding='utf8') as f:
             if is_first:
                 print(",".join(["Ground truth", "Generated response", "Gold Score", "Score"]), file=f)
             for context, target_sent, output_sent, model_score, gold_score in zip(conversations, gold_sentences, generated_sentences, model_scores, scores):

@@ -68,7 +68,8 @@ class Config(object):
         # Save path
         if self.mode == 'train' and self.checkpoint is None:
             time_now = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-            self.save_path = save_dir.joinpath(self.data, self.model, time_now)
+#             self.save_path = save_dir.joinpath(self.data, self.model, time_now)
+            self.save_path = save_dir.joinpath(self.data, self.model, self.model_name)
             self.logdir = self.save_path
             os.makedirs(self.save_path, exist_ok=True)
         elif self.checkpoint is not None:
@@ -116,7 +117,7 @@ def get_config(parse=True, **optional_kwargs):
     # Model
     parser.add_argument('--model', type=str, default='VHCR',
                         help='one of {HRED, VHRED, VHCR, ADEM}')
-    parser.add_argument('--model_name', type=str, required=True)   
+    parser.add_argument('--model_name', type=str)   
     
     
     # Currently does not support lstm
@@ -163,6 +164,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--data', type=str, default='ubuntu')
     
     parser.add_argument('--score_file', type=str, default='score.pkl')
+    parser.add_argument('--score_range', type=str, default='15')
     parser.add_argument('--scoring_mode', type=str, default='origin', choices=['origin', 'sigmoid'])
 
     # Parse arguments
